@@ -2,6 +2,7 @@
 using LlmTornado.Embedding.Models;
 using LlmTornado.VectorDatabases;
 using LlmTornado.VectorDatabases.Intergrations;
+using LlmTornado.VectorDatabases.Weaviate.Integrations;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -113,6 +114,47 @@ public class VectorDatabasesDemo
         VectorDocument vectorDocument2 = (VectorDocument)doc;
         Console.WriteLine($"VectorDocument2 Id: {vectorDocument2.Id}, Content: {vectorDocument2.Content}, Author: {vectorDocument2.Metadata["Author"]}");
 
+    }
+
+    [TornadoTest]
+    [Flaky]
+    public static async Task TestWeaviate()
+    {
+        var embeddingProvider = new TornadoEmbeddingProvider(Program.Connect(), EmbeddingModel.OpenAi.Gen3.Small);
+        float[] embedding = await embeddingProvider.Invoke("Hello World");
+        var weaviateDb = new WeaviateVectorDatabase(
+                uri: "",
+                vectorDimension: 1536,
+                apiKey: ""
+            );
+
+        // Initialize a collection
+        await weaviateDb.InitializeCollection("my_documents");
+
+        // Add documents with embeddings
+        var documents = new[]
+        {
+            new VectorDocument(
+                id: Guid.NewGuid().ToString(),
+                content: "Hello world",
+                embedding: embedding,
+                metadata: new Dictionary<string, object>
+                {
+                    { "source", "test" },
+                    { "timestamp", DateTime.UtcNow }
+                }
+            )
+        };
+
+        await weaviateDb.AddDocumentsAsync(documents);
+
+        // Query by embedding
+
+        var results = await weaviateDb.QueryByEmbeddingAsync(
+            embedding: embedding,
+            topK: 5,
+            includeScore: true
+        );
     }
 
 }

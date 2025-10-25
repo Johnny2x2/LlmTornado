@@ -51,6 +51,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LlmTornado.Microsoft.Extens
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LlmTornado.VectorDatabases.PgVector", "LlmTornado.VectorDatabases.PgVector\LlmTornado.VectorDatabases.PgVector.csproj", "{722E4695-ABEC-627B-2415-692A736A76DB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LlmTornado.VectorDatabases.Weaviate", "LlmTornado.VectorDatabases.Weaviate\LlmTornado.VectorDatabases.Weaviate.csproj", "{A561FAF4-9A84-9392-614E-FD6E5CF143AA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -141,6 +143,10 @@ Global
 		{722E4695-ABEC-627B-2415-692A736A76DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{722E4695-ABEC-627B-2415-692A736A76DB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{722E4695-ABEC-627B-2415-692A736A76DB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A561FAF4-9A84-9392-614E-FD6E5CF143AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A561FAF4-9A84-9392-614E-FD6E5CF143AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A561FAF4-9A84-9392-614E-FD6E5CF143AA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A561FAF4-9A84-9392-614E-FD6E5CF143AA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
