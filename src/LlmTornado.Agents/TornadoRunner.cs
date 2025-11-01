@@ -1,9 +1,11 @@
 ﻿using LlmTornado.Agents.DataModels;
+using LlmTornado.Agents.Telemetry;
 using LlmTornado.Chat;
 using LlmTornado.Chat.Models;
 using LlmTornado.ChatFunctions;
 using LlmTornado.Code;
 using LlmTornado.Common;
+using System.Diagnostics;
 
 namespace LlmTornado.Agents;
 
@@ -99,6 +101,16 @@ public class TornadoRunner
         CancellationToken cancellationToken = default
     )
     {
+#if MODERN
+        using var activity = agent.TelemetryProvider.StartActivity("TornadoAgent.Run", ActivityKind.Server);
+        agent.TelemetryProvider.SetTag("agent.id", agent.Id);
+        agent.TelemetryProvider.SetTag("agent.name", agent.Name);
+        agent.TelemetryProvider.SetTag("agent.model", agent.Model?.Name);
+        agent.TelemetryProvider.SetTag("agent.max_turns", maxTurns);
+        agent.TelemetryProvider.SetTag("agent.single_turn", singleTurn);
+        agent.TelemetryProvider.SetTag("agent.streaming", streaming);
+#endif
+        
         agent.Running = true;
         agent.Cancelled = false;
 
@@ -110,7 +122,20 @@ public class TornadoRunner
             // check if the input triggers a guardrail to stop the agent from continuing
             await CheckInputGuardrail(conversation, input, guardRail);
 
-            return await RunAgentLoop(conversation, agent, singleTurn, maxTurns, runnerCallback, streaming, responseId, toolPermissionHandle, runnerOptions, cancellationToken);
+            var result = await RunAgentLoop(conversation, agent, singleTurn, maxTurns, runnerCallback, streaming, responseId, toolPermissionHandle, runnerOptions, cancellationToken);
+            
+#if MODERN
+            agent.TelemetryProvider.SetStatus(ActivityStatusCode.Ok);
+#endif
+            return result;
+        }
+        catch (Exception ex)
+        {
+#if MODERN
+            agent.TelemetryProvider.RecordException(ex);
+            agent.TelemetryProvider.SetStatus(ActivityStatusCode.Error, ex.Message);
+#endif
+            throw;
         }
         finally
         {
@@ -200,22 +225,43 @@ public class TornadoRunner
             {
                 if (await CheckForCancellation(agent, chat, runnerCallback, runnerOptions, cancellationToken))
                 {
+#if MODERN
+                    agent.TelemetryProvider.AddEvent("agent.cancelled");
+#endif
                     break;
                 }
 
                 if (await CheckForMaxTurns(chat, turns, maxTurns, runnerCallback, runnerOptions))
                 {
+#if MODERN
+                    agent.TelemetryProvider.AddEvent("agent.max_turns_reached", new Dictionary<string, object?> { { "turns", turns } });
+#endif
                     break;
                 }
 
                 if (await CheckForMaxTokens(chat, chat.Messages.Sum(TokenEstimator.EstimateTokens), runnerCallback, runnerOptions))
                 {
+#if MODERN
+                    agent.TelemetryProvider.AddEvent("agent.max_tokens_reached");
+#endif
                     break;
                 }
 
                 turns++;
-                chat = await GetNewResponse(agent, chat, streaming, runnerCallback, toolPermissionRequest);
+#if MODERN
+                using (var turnActivity = agent.TelemetryProvider.StartActivity($"TornadoAgent.Turn", ActivityKind.Internal))
+                {
+                    agent.TelemetryProvider.SetTag("turn.number", turns);
+#endif
+                    chat = await GetNewResponse(agent, chat, streaming, runnerCallback, toolPermissionRequest);
+#if MODERN
+                }
+#endif
             } while (GotToolCall(chat) && !singleTurn);
+            
+#if MODERN
+            agent.TelemetryProvider.SetTag("agent.total_turns", turns);
+#endif
         }
         catch (Exception ex)
         {
@@ -403,36 +449,74 @@ public class TornadoRunner
     /// <returns></returns>
     private static async Task<FunctionResult> HandleToolCall(TornadoAgent agent, FunctionCall toolCall, Func<string, ValueTask<bool>>? toolPermissionHandle = null)
     {
+#if MODERN
+        using var activity = agent.TelemetryProvider.StartActivity("TornadoAgent.ToolCall", ActivityKind.Client);
+        agent.TelemetryProvider.SetTag("tool.name", toolCall.Name);
+        agent.TelemetryProvider.SetTag("tool.arguments", toolCall.Arguments?.ToString() ?? "");
+#endif
+        
         bool permissionGranted = true;
         FunctionResult functionResult = new FunctionResult(toolCall, "No Result", FunctionResultSetContentModes.Passthrough);
 
-        if (toolPermissionHandle != null)
+        try
         {
-            if (agent.ToolPermissionRequired[toolCall.Name])
+            if (toolPermissionHandle != null)
             {
-                //If tool permission is required, ask user for permission
-                permissionGranted = await toolPermissionHandle.Invoke($"Do you want to allow the agent to use the tool: {toolCall.Name}?");
+                if (agent.ToolPermissionRequired[toolCall.Name])
+                {
+                    //If tool permission is required, ask user for permission
+                    permissionGranted = await toolPermissionHandle.Invoke($"Do you want to allow the agent to use the tool: {toolCall.Name}?");
+#if MODERN
+                    agent.TelemetryProvider.SetTag("tool.permission_granted", permissionGranted);
+#endif
+                }
             }
-        }
 
-        if (!permissionGranted)
-        {
-            //If permission is not granted, remove the tool call from the request
-            functionResult = new FunctionResult(toolCall, "Tool Permission was not granted by user", FunctionResultSetContentModes.Passthrough);
-        }
-        else
-        {
-            if (agent.McpTools.ContainsKey(toolCall.Name))
+            if (!permissionGranted)
             {
-                functionResult = await ToolRunner.CallMcpToolAsync(agent, toolCall);
+                //If permission is not granted, remove the tool call from the request
+                functionResult = new FunctionResult(toolCall, "Tool Permission was not granted by user", FunctionResultSetContentModes.Passthrough);
+#if MODERN
+                agent.TelemetryProvider.AddEvent("tool.permission_denied");
+#endif
             }
             else
             {
-                functionResult = agent.AgentTools.ContainsKey(toolCall.Name) ? await ToolRunner.CallAgentToolAsync(agent, toolCall) : await ToolRunner.CallFuncToolAsync(agent, toolCall);
+                string toolType;
+                if (agent.McpTools.ContainsKey(toolCall.Name))
+                {
+                    toolType = "mcp";
+                    functionResult = await ToolRunner.CallMcpToolAsync(agent, toolCall);
+                }
+                else if (agent.AgentTools.ContainsKey(toolCall.Name))
+                {
+                    toolType = "agent";
+                    functionResult = await ToolRunner.CallAgentToolAsync(agent, toolCall);
+                }
+                else
+                {
+                    toolType = "function";
+                    functionResult = await ToolRunner.CallFuncToolAsync(agent, toolCall);
+                }
+                
+#if MODERN
+                agent.TelemetryProvider.SetTag("tool.type", toolType);
+#endif
             }
-        }
 
-        return functionResult;
+#if MODERN
+            agent.TelemetryProvider.SetStatus(ActivityStatusCode.Ok);
+#endif
+            return functionResult;
+        }
+        catch (Exception ex)
+        {
+#if MODERN
+            agent.TelemetryProvider.RecordException(ex);
+            agent.TelemetryProvider.SetStatus(ActivityStatusCode.Error, ex.Message);
+#endif
+            throw;
+        }
     }
 
     /// <summary>

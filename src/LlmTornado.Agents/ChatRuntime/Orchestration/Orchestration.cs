@@ -1,4 +1,5 @@
 ﻿using LlmTornado.Agents.DataModels;
+using LlmTornado.Agents.Telemetry;
 using LlmTornado.Chat;
 using LlmTornado.Code;
 using System;
@@ -92,6 +93,11 @@ public abstract class Orchestration
     /// </summary>
     public OrchestrationOptions Options { get; set; } = new OrchestrationOptions();
 
+    /// <summary>
+    /// Gets or sets the telemetry provider for instrumenting orchestration operations.
+    /// </summary>
+    public ITelemetryProvider TelemetryProvider { get; set; } = NoOpTelemetryProvider.Instance;
+
     public Orchestration()
     {
 
@@ -174,6 +180,12 @@ public abstract class Orchestration
         if (CurrentRunnablesWithProcesses.Count == 0) { HasCompletedSuccessfully(); return; }
 
         _stepCounter++;
+        
+#if MODERN
+        using var activity = TelemetryProvider.StartActivity("Orchestration.ProcessTick", ActivityKind.Internal);
+        TelemetryProvider.SetTag("orchestration.step", _stepCounter);
+        TelemetryProvider.SetTag("orchestration.active_runnables_count", CurrentRunnablesWithProcesses.Count);
+#endif
 
         OnOrchestrationEvent?.Invoke(new OnTickOrchestrationEvent()); //Invoke the tick state machine event
         List<Task> tasks = [];
@@ -209,6 +221,12 @@ public abstract class Orchestration
 
     private async Task InitializeRunnable(OrchestrationRunnableBase runnable)
     {
+#if MODERN
+        using var activity = TelemetryProvider.StartActivity("Orchestration.InitializeRunnable", ActivityKind.Internal);
+        TelemetryProvider.SetTag("runnable.id", runnable.Id);
+        TelemetryProvider.SetTag("runnable.type", runnable.GetType().Name);
+#endif
+        
         //Gain access to state machine
         runnable.Orchestrator ??= this; //Set the current state machine if not already set
 
@@ -361,8 +379,29 @@ public abstract class Orchestration
     /// <returns></returns>
     public async Task InvokeAsync(object? input = null)
     {
-        await Initialize(input);
-        await RunToCompletion();
+#if MODERN
+        using var activity = TelemetryProvider.StartActivity("Orchestration.Invoke", ActivityKind.Server);
+        TelemetryProvider.SetTag("orchestration.initial_runnable", InitialRunnable?.Id);
+#endif
+        
+        try
+        {
+            await Initialize(input);
+            await RunToCompletion();
+            
+#if MODERN
+            TelemetryProvider.SetTag("orchestration.steps", _stepCounter);
+            TelemetryProvider.SetStatus(ActivityStatusCode.Ok);
+#endif
+        }
+        catch (Exception ex)
+        {
+#if MODERN
+            TelemetryProvider.RecordException(ex);
+            TelemetryProvider.SetStatus(ActivityStatusCode.Error, ex.Message);
+#endif
+            throw;
+        }
     }
 
     internal async Task RunToCompletion()

@@ -1,4 +1,5 @@
 ﻿using LlmTornado.Agents.DataModels;
+using LlmTornado.Agents.Telemetry;
 using LlmTornado.Chat;
 using LlmTornado.Chat.Models;
 using LlmTornado.Common;
@@ -104,6 +105,11 @@ public class TornadoAgent
     /// Should the agent response be streamed.
     /// </summary>
     public bool Streaming { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the telemetry provider for instrumenting agent operations.
+    /// </summary>
+    public ITelemetryProvider TelemetryProvider { get; set; } = NoOpTelemetryProvider.Instance;
 
 
     /// <summary>
