@@ -1,4 +1,5 @@
 ﻿using LlmTornado.Agents.DataModels;
+using LlmTornado.Agents.Telemetry;
 using LlmTornado.Chat;
 using LlmTornado.Code;
 using System;
@@ -170,23 +171,41 @@ public abstract class Orchestration
     /// <returns></returns>
     private async Task ProcessTick()
     {
+        using var activity = AgentTelemetry.ActivitySource.StartActivity("Orchestration.ProcessTick");
+        
         //If there are no processes, return
-        if (CurrentRunnablesWithProcesses.Count == 0) { HasCompletedSuccessfully(); return; }
+        if (CurrentRunnablesWithProcesses.Count == 0) 
+        { 
+            HasCompletedSuccessfully(); 
+            activity?.SetTag("orchestration.tick.no_processes", true);
+            return; 
+        }
 
         _stepCounter++;
+        
+        activity?.SetTag("orchestration.tick.step", _stepCounter);
+        activity?.SetTag("orchestration.tick.runnable_count", CurrentRunnablesWithProcesses.Count);
 
         OnOrchestrationEvent?.Invoke(new OnTickOrchestrationEvent()); //Invoke the tick state machine event
         List<Task> tasks = [];
         
-        CurrentRunnablesWithProcesses.ForEach(runnable => tasks.Add(Task.Run(async () =>
+        try
         {
-            OnOrchestrationEvent?.Invoke(new OnInvokedRunnableEvent(runnable)); //Invoke the state entered event
-            await runnable.Invoke(); //Invoke the state process
-        }, CancelToken)));
+            CurrentRunnablesWithProcesses.ForEach(runnable => tasks.Add(Task.Run(async () =>
+            {
+                OnOrchestrationEvent?.Invoke(new OnInvokedRunnableEvent(runnable)); //Invoke the state entered event
+                await runnable.Invoke(); //Invoke the state process
+            }, CancelToken)));
 
-        //Wait for collection
-        await Task.WhenAll(tasks);
-        tasks.Clear();
+            //Wait for collection
+            await Task.WhenAll(tasks);
+            tasks.Clear();
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
@@ -361,12 +380,27 @@ public abstract class Orchestration
     /// <returns></returns>
     public async Task InvokeAsync(object? input = null)
     {
-        await Initialize(input);
-        await RunToCompletion();
+        using var activity = AgentTelemetry.ActivitySource.StartActivity("Orchestration.InvokeAsync");
+        activity?.SetTag("orchestration.type", GetType().Name);
+        activity?.SetTag("orchestration.has_input", input != null);
+        
+        try
+        {
+            await Initialize(input);
+            await RunToCompletion();
+            activity?.SetTag("orchestration.completed", IsCompleted);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
     }
 
     internal async Task RunToCompletion()
     {
+        using var activity = AgentTelemetry.ActivitySource.StartActivity("Orchestration.RunToCompletion");
+        
         if(!_isInitialized)
         {
             throw new InvalidOperationException("Runtime has not been initialized. Call InitializeRuntime() before running to completion.");
@@ -374,9 +408,23 @@ public abstract class Orchestration
 
         OnOrchestrationEvent?.Invoke(new OnBeginOrchestrationEvent()); //Invoke the begin state machine event
 
-        while (!IsCompleted && !StopTrigger.IsCancellationRequested)
+        int stepCount = 0;
+        try
         {
-            await InvokeStep();
+            while (!IsCompleted && !StopTrigger.IsCancellationRequested)
+            {
+                await InvokeStep();
+                stepCount++;
+            }
+            
+            activity?.SetTag("orchestration.steps_executed", stepCount);
+            activity?.SetTag("orchestration.is_completed", IsCompleted);
+            activity?.SetTag("orchestration.is_cancelled", StopTrigger.IsCancellationRequested);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
     }
 

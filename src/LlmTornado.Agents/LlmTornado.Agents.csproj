@@ -16,6 +16,12 @@
         <ProjectReference Include="..\LlmTornado\LlmTornado.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+        <PackageReference Include="OpenTelemetry" Version="1.13.1" />
+        <PackageReference Include="OpenTelemetry.Api" Version="1.13.1" />
+        <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="9.0.0" />
+    </ItemGroup>
+
     <PropertyGroup>
         <DefineConstants Condition="$([MSBuild]::IsTargetFrameworkCompatible('$(TargetFramework)', 'net8.0'))">$(DefineConstants);MODERN</DefineConstants>
     </PropertyGroup>

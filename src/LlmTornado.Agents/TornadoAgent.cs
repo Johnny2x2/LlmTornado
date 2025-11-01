@@ -1,9 +1,11 @@
 ﻿using LlmTornado.Agents.DataModels;
+using LlmTornado.Agents.Telemetry;
 using LlmTornado.Chat;
 using LlmTornado.Chat.Models;
 using LlmTornado.Common;
 using LlmTornado.Responses;
 using System;
+using System.Diagnostics;
 #if !MODERN
 using Polyfills;
 #endif
@@ -369,19 +371,40 @@ public class TornadoAgent
         TornadoRunnerOptions? runnerOptions = null,
         CancellationToken cancellationToken = default)
     {
-        onAgentRunnerEvent += OnAgentRunnerEvent;
-        return await TornadoRunner.RunAsync(this, 
-            input: input, 
-            messagesToAppend: appendMessages, 
-            guardRail: inputGuardRailFunction, 
-            singleTurn: singleTurn,
-            cancellationToken: cancellationToken, 
-            streaming: streaming ?? Streaming,
-            runnerCallback: onAgentRunnerEvent, 
-            maxTurns: maxTurns, 
-            responseId: responseId, 
-            runnerOptions: runnerOptions,
-            toolPermissionHandle: toolPermissionHandle);
+        using var activity = AgentTelemetry.ActivitySource.StartActivity("TornadoAgent.Run");
+        activity?.SetTag("agent.name", Name);
+        activity?.SetTag("agent.id", Id);
+        activity?.SetTag("agent.model", Model?.Name ?? "unknown");
+        activity?.SetTag("agent.max_turns", maxTurns);
+        activity?.SetTag("agent.streaming", streaming ?? Streaming);
+        activity?.SetTag("agent.single_turn", singleTurn);
+        
+        try
+        {
+            onAgentRunnerEvent += OnAgentRunnerEvent;
+            var result = await TornadoRunner.RunAsync(this, 
+                input: input, 
+                messagesToAppend: appendMessages, 
+                guardRail: inputGuardRailFunction, 
+                singleTurn: singleTurn,
+                cancellationToken: cancellationToken, 
+                streaming: streaming ?? Streaming,
+                runnerCallback: onAgentRunnerEvent, 
+                maxTurns: maxTurns, 
+                responseId: responseId, 
+                runnerOptions: runnerOptions,
+                toolPermissionHandle: toolPermissionHandle);
+            
+            activity?.SetTag("agent.turns_executed", result.Messages.Count);
+            activity?.SetTag("agent.completed", true);
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
     } 
 
     /// <summary>
