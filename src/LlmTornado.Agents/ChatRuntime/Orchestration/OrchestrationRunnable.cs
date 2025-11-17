@@ -381,6 +381,35 @@ public abstract class OrchestrationRunnable<TInput, TOutput> : OrchestrationRunn
             AddAdvancer<TOutput, T>(transition);
         }
     }
+
+    /// <summary>
+    /// Adds multiple advancers at once from an AdvancerBuilder.
+    /// This allows for a more fluent and readable syntax when creating advancers,
+    /// especially when multiple runnables share the same condition and conversion logic.
+    /// </summary>
+    /// <param name="advancers">An array of advancers to add, typically from an AdvancerBuilder</param>
+    /// <example>
+    /// <code>
+    /// runnable.AddAdvancerRange(new AdvancerBuilder&lt;OutputType&gt;()
+    ///     .ToRunnable(nextRunnable)
+    ///     .WithCondition(output => output.IsValid)
+    ///     .WithConversion(output => output.Data)
+    ///     .Build());
+    /// </code>
+    /// </example>
+    public void AddAdvancerRange(params OrchestrationAdvancer[] advancers)
+    {
+        if (advancers == null)
+            throw new ArgumentNullException(nameof(advancers));
+
+        foreach (var advancer in advancers)
+        {
+            if (advancer == null)
+                throw new ArgumentException("Advancer array contains null element", nameof(advancers));
+            
+            BaseAdvancers.Add(advancer);
+        }
+    }
     #endregion
 
     /// <summary>
